@@ -63,6 +63,13 @@ func DecodeTxs(txsData []byte, forkID uint64) ([]types.Transaction, []byte, []ui
 			log.Debug("error parsing header length: ", err)
 			return []types.Transaction{}, txsData, []uint8{}, err
 		}
+
+		// if num is 11 then we are trying to parse a `changeL2Block` transaction so skip it
+		if num == changeL2BlockTransactionId {
+			pos += 9
+			continue
+		}
+
 		// First byte is the length and must be ignored
 		if num < c0 {
 			log.Debug("error num < c0 : %d, %d", num, c0)
