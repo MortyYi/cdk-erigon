@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk/legacy_executor_verifier/proto/github.com/0xPolygonHermez/zkevm-node/state/runtime/executor"
 	"github.com/ledgerwatch/erigon/zk/syncer"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon/core/types"
 )
 
 const (
@@ -60,6 +61,10 @@ type LegacyExecutorVerifier struct {
 	witnessGenerator WitnessGenerator
 	l1Syncer         *syncer.L1Syncer
 	executorGrpc     executor.ExecutorServiceClient
+	limbo            *Limbo
+
+	unverifiedTxs []types.Transaction
+	txsLock       sync.Mutex
 }
 
 func NewLegacyExecutorVerifier(
@@ -69,6 +74,7 @@ func NewLegacyExecutorVerifier(
 	db kv.RwDB,
 	witnessGenerator WitnessGenerator,
 	l1Syncer *syncer.L1Syncer,
+	limbo *Limbo,
 ) *LegacyExecutorVerifier {
 	executorLocks := make([]*sync.Mutex, len(executors))
 	for i := range executorLocks {
@@ -79,9 +85,9 @@ func NewLegacyExecutorVerifier(
 
 	availableLock := sync.Mutex{}
 	verifier := &LegacyExecutorVerifier{
+		db:               db,
 		cfg:              cfg,
 		executors:        executors,
-		db:               db,
 		executorLocks:    executorLocks,
 		available:        sync.NewCond(&availableLock),
 		requestChan:      make(chan *VerifierRequest, maximumInflightRequests),
@@ -92,9 +98,17 @@ func NewLegacyExecutorVerifier(
 		streamServer:     streamServer,
 		witnessGenerator: witnessGenerator,
 		l1Syncer:         l1Syncer,
+		limbo:            limbo,
+		unverifiedTxs:    make([]types.Transaction, 0),
+		txsLock:          sync.Mutex{},
 	}
 
 	return verifier
+}
+
+func (v *LegacyExecutorVerifier) VerifySynchronously(request *VerifierRequest) (*VerifierResponse, error) {
+	ctx := context.Background()
+	return v.handleRequestSynchronously(ctx, request)
 }
 
 func (v *LegacyExecutorVerifier) StopWork() {
@@ -206,15 +220,128 @@ func (v *LegacyExecutorVerifier) handleRequest(ctx context.Context, request *Ver
 	}
 
 	// todo [zkevm] do something with the result but for now just move on in a happy state, we also need to handle errors
-	_, _ = execer.Verify(payload, &request.StateRoot)
+	success, err := execer.Verify(payload, &request.StateRoot)
+	if err != nil {
+		// TODO: could an error signify we need limbo or is it just a failure? (check)
+	}
+
+	// if the verification failed, then set limbo state to true - the node is 'in limbo' but won't do anything about it until executor verification stage
+	// TODO: perhaps we can remove this from here and allow the verification stage alone to deal with it
+	if !success {
+		inLimbo, _ := v.limbo.CheckLimboMode()
+		if !inLimbo {
+			log.Debug("entering limbo!!!!!!")
+			v.limbo.EnterLimboMode(request.BatchNumber)
+
+			// stop work and empty requests
+			v.StopWork()
+			close(v.requestChan)
+			for range v.requestChan {
+			}
+		}
+	}
 
 	response := &VerifierResponse{
 		BatchNumber: request.BatchNumber,
-		Valid:       true,
+		Valid:       success,
 	}
 	v.responseChan <- response
 
 	return nil
+}
+
+func (v *LegacyExecutorVerifier) handleRequestSynchronously(ctx context.Context, request *VerifierRequest) (*VerifierResponse, error) {
+	// if we have no executor config then just skip this step and treat everything as OK
+	if len(v.executors) == 0 {
+		response := &VerifierResponse{
+			BatchNumber: request.BatchNumber,
+			Valid:       true,
+		}
+		return response, nil
+	}
+
+	// todo [zkevm] for now just using one executor but we need to use more
+	execer := v.executors[0]
+
+	tx, err := v.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	hermezDb := hermez_db.NewHermezDbReader(tx)
+
+	// get the data stream bytes
+	blocks, err := hermezDb.GetL2BlockNosByBatch(request.BatchNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	streamBytes, err := v.GetStreamBytes(request, tx, blocks, hermezDb)
+	if err != nil {
+		return nil, err
+	}
+
+	witness, err := v.witnessGenerator.GenerateWitness(tx, ctx, blocks[0], blocks[len(blocks)-1], false)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Debug("witness generated", "data", hex.EncodeToString(witness))
+
+	oldAccInputHash, err := v.l1Syncer.GetOldAccInputHash(ctx, &v.cfg.L1PolygonRollupManager, ROLLUP_ID, request.BatchNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	// now we need to figure out the timestamp limit for this payload.  It must be:
+	// timestampLimit >= currentTimestamp (from batch pre-state) + deltaTimestamp
+	// so to ensure we have a good value we can take the timestamp of the last block in the batch
+	// and just add 5 minutes
+	lastBlock, err := rawdb.ReadBlockByNumber(tx, blocks[len(blocks)-1])
+	if err != nil {
+		return nil, err
+	}
+	timestampLimit := lastBlock.Time()
+
+	payload := &Payload{
+		Witness:           witness,
+		DataStream:        streamBytes,
+		Coinbase:          v.cfg.SequencerAddress.String(),
+		OldAccInputHash:   oldAccInputHash.Bytes(),
+		L1InfoRoot:        nil,
+		TimestampLimit:    timestampLimit,
+		ForcedBlockhashL1: []byte{0},
+		ContextId:         strconv.Itoa(int(request.BatchNumber)),
+	}
+
+	// todo [zkevm] do something with the result but for now just move on in a happy state, we also need to handle errors
+	success, err := execer.Verify(payload, &request.StateRoot)
+	if err != nil {
+		// TODO: could an error signify we need limbo or is it just a failure? (check)
+	}
+
+	// if the verification failed, then set limbo state to true - the node is 'in limbo' but won't do anything about it until executor verification stage
+	// TODO: perhaps we can remove this from here and allow the verification stage alone to deal with it
+	if !success {
+		inLimbo, _ := v.limbo.CheckLimboMode()
+		if !inLimbo {
+			log.Debug("entering limbo!!!!!!")
+			v.limbo.EnterLimboMode(request.BatchNumber)
+
+			// stop work and empty requests
+			v.StopWork()
+			close(v.requestChan)
+			for range v.requestChan {
+			}
+		}
+	}
+
+	response := &VerifierResponse{
+		BatchNumber: request.BatchNumber,
+		Valid:       success,
+	}
+	return response, nil
 }
 
 func (v *LegacyExecutorVerifier) GetStreamBytes(request *VerifierRequest, tx kv.Tx, blocks []uint64, hermezDb *hermez_db.HermezDbReader) ([]byte, error) {
@@ -277,4 +404,24 @@ func (v *LegacyExecutorVerifier) RemoveResponse(batchNumber uint64) {
 		}
 	}
 	v.responses = result
+}
+
+func (v *LegacyExecutorVerifier) AddTxs(txs []types.Transaction) {
+	v.txsLock.Lock()
+	defer v.txsLock.Unlock()
+	v.unverifiedTxs = append(v.unverifiedTxs, txs...)
+}
+
+func (v *LegacyExecutorVerifier) GetTxs() []types.Transaction {
+	v.txsLock.Lock()
+	defer v.txsLock.Unlock()
+	result := make([]types.Transaction, len(v.unverifiedTxs))
+	copy(result, v.unverifiedTxs)
+	return result
+}
+
+func (v *LegacyExecutorVerifier) ClearTxs() {
+	v.txsLock.Lock()
+	defer v.txsLock.Unlock()
+	v.unverifiedTxs = make([]types.Transaction, 0)
 }

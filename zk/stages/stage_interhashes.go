@@ -451,6 +451,9 @@ func zkIncrementIntermediateHashes(logPrefix string, s *stagedsync.StageState, d
 }
 
 func unwindZkSMT(logPrefix string, from, to uint64, db kv.RwTx, checkRoot bool, expectedRootHash *libcommon.Hash, quit <-chan struct{}) (libcommon.Hash, error) {
+	if logPrefix == "" {
+		logPrefix = "witness-gen"
+	}
 	log.Info(fmt.Sprintf("[%s] Unwind trie hashes started", logPrefix))
 	defer log.Info(fmt.Sprintf("[%s] Unwind ended", logPrefix))
 

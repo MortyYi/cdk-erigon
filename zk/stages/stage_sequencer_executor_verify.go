@@ -2,6 +2,8 @@ package stages
 
 import (
 	"context"
+	"sort"
+
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
@@ -9,22 +11,28 @@ import (
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/erigon/zk/legacy_executor_verifier"
 	"github.com/ledgerwatch/erigon/zk/txpool"
-	"sort"
+	"fmt"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/ledgerwatch/erigon/core/types"
 )
 
 type SequencerExecutorVerifyCfg struct {
 	db       kv.RwDB
 	verifier *legacy_executor_verifier.LegacyExecutorVerifier
 	txPool   *txpool.TxPool
+	limbo    *legacy_executor_verifier.Limbo
 }
 
 func StageSequencerExecutorVerifyCfg(
 	db kv.RwDB,
 	verifier *legacy_executor_verifier.LegacyExecutorVerifier,
+	limbo *legacy_executor_verifier.Limbo,
 ) SequencerExecutorVerifyCfg {
 	return SequencerExecutorVerifyCfg{
 		db:       db,
 		verifier: verifier,
+		limbo:    limbo,
 	}
 }
 
@@ -55,36 +63,70 @@ func SpawnSequencerExecutorVerifyStage(
 		return err
 	}
 
-	// get the latest responses from the verifier then sort them, so we can make sure we're handling verifications
-	// in order
-	responses := cfg.verifier.GetAllResponses()
+	inLimbo, limboBatch := cfg.limbo.CheckLimboMode()
 
-	// sort responses by batch number in ascending order
-	sort.Slice(responses, func(i, j int) bool {
-		return responses[i].BatchNumber < responses[j].BatchNumber
-	})
+	// [limbo] if not in limbo, then send via channel
+	if !inLimbo {
+		// get the latest responses from the verifier then sort them, so we can make sure we're handling verifications
+		// in order
+		responses := cfg.verifier.GetAllResponses()
 
-	for _, response := range responses {
-		// ensure that the first response is the next batch based on the current stage progress
-		// otherwise just return early until we get it
-		if response.BatchNumber != progress+1 {
+		// sort responses by batch number in ascending order
+		sort.Slice(responses, func(i, j int) bool {
+			return responses[i].BatchNumber < responses[j].BatchNumber
+		})
+
+		failingBatches := make([]uint64, 0)
+
+		for _, response := range responses {
+			// ensure that the first response is the next batch based on the current stage progress
+			// otherwise just return early until we get it
+			if response.BatchNumber != progress+1 {
+				return nil
+			}
+
+			// now check that we are indeed in a good state to continue
+			if !response.Valid {
+				// [limbo] collect failing batches
+				failingBatches = append(failingBatches, response.BatchNumber)
+			}
+
+			// now let the verifier know we have got this message, so it can release it
+			cfg.verifier.RemoveResponse(response.BatchNumber)
+			progress = response.BatchNumber
+		}
+
+		// [limbo] if we have any failing batches, we need to enter limbo mode at the lowest failing batch
+		if len(failingBatches) > 0 {
+			minBatch := failingBatches[0]
+			// double check min just in case logic above changes
+			for _, batch := range failingBatches {
+				if batch < minBatch {
+					minBatch = batch
+				}
+			}
+
+			// [limbo] set limbo mode true at this batch
+			cfg.limbo.EnterLimboMode(minBatch)
+
+			// [limbo] set progress to the batch before the lowest failing batch
+			progress = minBatch - 1
+
+			// [limbo] unwind the node to the highest block in the batch before the lowest failing batch
+			blockNo, err2 := hermezDb.GetHighestBlockInBatch(progress)
+			if err2 != nil {
+				return err2
+			}
+
+			// [limbo] unwind and exit the verification stage
+			u.UnwindTo(blockNo, libcommon.Hash{})
 			return nil
 		}
 
-		// now check that we are indeed in a good state to continue
-		if !response.Valid {
-			// now we need to rollback and handle the error
-			// todo [zkevm]!
-		}
-
-		// all good so just update the stage progress for now
-		if err = stages.SaveStageProgress(tx, stages.SequenceExecutorVerify, response.BatchNumber); err != nil {
+		// update stage progress batch number to 'progress'
+		if err = stages.SaveStageProgress(tx, stages.SequenceExecutorVerify, progress); err != nil {
 			return err
 		}
-
-		// now let the verifier know we have got this message, so it can release it
-		cfg.verifier.RemoveResponse(response.BatchNumber)
-		progress = response.BatchNumber
 	}
 
 	// progress here is at the block level
@@ -122,7 +164,54 @@ func SpawnSequencerExecutorVerifyStage(
 				return err
 			}
 
-			cfg.verifier.AddRequest(&legacy_executor_verifier.VerifierRequest{BatchNumber: batch, StateRoot: block.Root()})
+			if inLimbo {
+				result, err2 := cfg.verifier.VerifySynchronously(&legacy_executor_verifier.VerifierRequest{BatchNumber: batch, StateRoot: block.Root()})
+				if err2 != nil {
+					return err2
+				}
+
+				if !result.Valid {
+					txs := block.Body().Transactions
+					if len(txs) > 1 {
+						return fmt.Errorf("block %d has more than 1 tx in limbo", lastBlockNumber)
+					}
+
+					tx0 := txs[0]
+
+					vtxs := cfg.verifier.GetTxs()
+
+					// find and remove tx from vtxs
+					for i, vtx := range vtxs {
+						if vtx.Hash() == tx0.Hash() {
+							vtxs = append(vtxs[:i], vtxs[i+1:]...)
+							break
+						}
+					}
+
+					// add valid/assumed valid txs back to the txpool
+					slots, err := addTransactionsToSlots(vtxs)
+					if err != nil {
+						return err
+					}
+					_, err = cfg.txPool.AddLocalTxs(ctx, slots, tx)
+					if err != nil {
+						return err
+					}
+
+					cfg.verifier.ClearTxs()
+					cfg.limbo.ExitLimboMode()
+
+					// unwind node to known last good block
+					lastGoodBlockNumber, err := hermezDb.GetHighestBlockInBatch(limboBatch - 1)
+					if err != nil {
+						return err
+					}
+					u.UnwindTo(lastGoodBlockNumber, libcommon.Hash{})
+					return nil
+				}
+			} else {
+				cfg.verifier.AddRequest(&legacy_executor_verifier.VerifierRequest{BatchNumber: batch, StateRoot: block.Root()})
+			}
 		}
 	}
 
@@ -154,4 +243,14 @@ func PruneSequencerExecutorVerifyStage(
 	initialCycle bool,
 ) error {
 	return nil
+}
+
+func addTransactionsToSlots(transactions []types.Transaction) (types2.TxSlots, error) {
+	// todo [limbo] finish implementation
+	slot := types2.TxSlots{
+		Txs:     nil,
+		Senders: nil,
+		IsLocal: nil,
+	}
+	return slot, nil
 }
