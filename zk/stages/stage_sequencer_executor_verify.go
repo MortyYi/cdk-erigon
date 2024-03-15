@@ -65,10 +65,11 @@ func SpawnSequencerExecutorVerifyStage(
 	}
 
 	inLimbo, limboBatch := cfg.limbo.CheckLimboMode()
-
 	if inLimbo {
 		log.Info("in limbo mode", "batch", limboBatch)
 	}
+
+	failingBatches := make([]uint64, 0)
 
 	// [limbo] if not in limbo, then send via channel
 	if !inLimbo {
@@ -80,8 +81,6 @@ func SpawnSequencerExecutorVerifyStage(
 		sort.Slice(responses, func(i, j int) bool {
 			return responses[i].BatchNumber < responses[j].BatchNumber
 		})
-
-		failingBatches := make([]uint64, 0)
 
 		for _, response := range responses {
 			// ensure that the first response is the next batch based on the current stage progress
@@ -101,37 +100,37 @@ func SpawnSequencerExecutorVerifyStage(
 			progress = response.BatchNumber
 		}
 
-		// [limbo] if we have any failing batches, we need to enter limbo mode at the lowest failing batch
-		if len(failingBatches) > 0 {
-			minBatch := failingBatches[0]
-			// double check min just in case logic above changes
-			for _, batch := range failingBatches {
-				if batch < minBatch {
-					minBatch = batch
-				}
-			}
-
-			// [limbo] set limbo mode true at this batch
-			cfg.limbo.EnterLimboMode(minBatch)
-
-			// [limbo] set progress to the batch before the lowest failing batch
-			progress = minBatch - 1
-
-			// [limbo] unwind the node to the highest block in the batch before the lowest failing batch
-			blockNo, err2 := hermezDb.GetHighestBlockInBatch(progress)
-			if err2 != nil {
-				return err2
-			}
-
-			// [limbo] unwind and exit the verification stage
-			u.UnwindTo(blockNo, libcommon.Hash{})
-			return nil
-		}
-
 		// update stage progress batch number to 'progress'
 		if err = stages.SaveStageProgress(tx, stages.SequenceExecutorVerify, progress); err != nil {
 			return err
 		}
+	}
+
+	// [limbo] if we have any failing batches, we need to enter limbo mode at the lowest failing batch
+	if len(failingBatches) > 0 {
+		minBatch := failingBatches[0]
+		// double check min just in case logic above changes
+		for _, batch := range failingBatches {
+			if batch < minBatch {
+				minBatch = batch
+			}
+		}
+
+		// [limbo] set limbo mode true at this batch
+		cfg.limbo.EnterLimboMode(minBatch)
+
+		// [limbo] set progress to the batch before the lowest failing batch
+		progress = minBatch - 1
+
+		// [limbo] unwind the node to the highest block in the batch before the lowest failing batch
+		blockNo, err2 := hermezDb.GetHighestBlockInBatch(progress)
+		if err2 != nil {
+			return err2
+		}
+
+		// [limbo] unwind and exit the verification stage
+		u.UnwindTo(blockNo, libcommon.Hash{})
+		return nil
 	}
 
 	// progress here is at the block level
@@ -237,6 +236,7 @@ func UnwindSequencerExecutorVerifyStage(
 	cfg SequencerExecutorVerifyCfg,
 	initialCycle bool,
 ) error {
+	// TODO [limbo] implement unwind
 	return nil
 }
 
