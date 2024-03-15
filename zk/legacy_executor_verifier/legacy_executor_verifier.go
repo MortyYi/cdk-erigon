@@ -64,7 +64,9 @@ type LegacyExecutorVerifier struct {
 	limbo            *Limbo
 
 	unverifiedTxs []types.Transaction
-	txsLock       sync.Mutex
+	verifiedTxs   []types.Transaction
+	uvtxsLock     sync.Mutex
+	vtxsLock      sync.Mutex
 }
 
 func NewLegacyExecutorVerifier(
@@ -100,15 +102,17 @@ func NewLegacyExecutorVerifier(
 		l1Syncer:         l1Syncer,
 		limbo:            limbo,
 		unverifiedTxs:    make([]types.Transaction, 0),
-		txsLock:          sync.Mutex{},
+		verifiedTxs:      make([]types.Transaction, 0),
+		uvtxsLock:        sync.Mutex{},
+		vtxsLock:         sync.Mutex{},
 	}
 
 	return verifier
 }
 
-func (v *LegacyExecutorVerifier) VerifySynchronously(request *VerifierRequest) (*VerifierResponse, error) {
+func (v *LegacyExecutorVerifier) VerifySynchronously(tx kv.RwTx, request *VerifierRequest) (*VerifierResponse, error) {
 	ctx := context.Background()
-	return v.handleRequestSynchronously(ctx, request)
+	return v.handleRequestSynchronously(ctx, tx, request)
 }
 
 func (v *LegacyExecutorVerifier) StopWork() {
@@ -225,21 +229,22 @@ func (v *LegacyExecutorVerifier) handleRequest(ctx context.Context, request *Ver
 		// TODO: could an error signify we need limbo or is it just a failure? (check)
 	}
 
-	// if the verification failed, then set limbo state to true - the node is 'in limbo' but won't do anything about it until executor verification stage
-	// TODO: perhaps we can remove this from here and allow the verification stage alone to deal with it
-	if !success {
-		inLimbo, _ := v.limbo.CheckLimboMode()
-		if !inLimbo {
-			log.Debug("entering limbo!!!!!!")
-			v.limbo.EnterLimboMode(request.BatchNumber)
-
-			// stop work and empty requests
-			v.StopWork()
-			close(v.requestChan)
-			for range v.requestChan {
-			}
-		}
-	}
+	// TODO [limbo]: later enable this once limbo is working
+	//// if the verification failed, then set limbo state to true - the node is 'in limbo' but won't do anything about it until executor verification stage
+	//// TODO: perhaps we can remove this from here and allow the verification stage alone to deal with it
+	//if !success {
+	//	inLimbo, _ := v.limbo.CheckLimboMode()
+	//	if !inLimbo {
+	//		log.Debug("entering limbo!!!!!!")
+	//		v.limbo.EnterLimboMode(request.BatchNumber)
+	//
+	//		// stop work and empty requests
+	//		v.StopWork()
+	//		close(v.requestChan)
+	//		for range v.requestChan {
+	//		}
+	//	}
+	//}
 
 	response := &VerifierResponse{
 		BatchNumber: request.BatchNumber,
@@ -250,7 +255,7 @@ func (v *LegacyExecutorVerifier) handleRequest(ctx context.Context, request *Ver
 	return nil
 }
 
-func (v *LegacyExecutorVerifier) handleRequestSynchronously(ctx context.Context, request *VerifierRequest) (*VerifierResponse, error) {
+func (v *LegacyExecutorVerifier) handleRequestSynchronously(ctx context.Context, tx kv.RwTx, request *VerifierRequest) (*VerifierResponse, error) {
 	// if we have no executor config then just skip this step and treat everything as OK
 	if len(v.executors) == 0 {
 		response := &VerifierResponse{
@@ -262,12 +267,6 @@ func (v *LegacyExecutorVerifier) handleRequestSynchronously(ctx context.Context,
 
 	// todo [zkevm] for now just using one executor but we need to use more
 	execer := v.executors[0]
-
-	tx, err := v.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
 
 	hermezDb := hermez_db.NewHermezDbReader(tx)
 
@@ -406,22 +405,40 @@ func (v *LegacyExecutorVerifier) RemoveResponse(batchNumber uint64) {
 	v.responses = result
 }
 
-func (v *LegacyExecutorVerifier) AddTxs(txs []types.Transaction) {
-	v.txsLock.Lock()
-	defer v.txsLock.Unlock()
+func (v *LegacyExecutorVerifier) AddUnverifiedTxs(txs []types.Transaction) {
+	v.uvtxsLock.Lock()
+	defer v.uvtxsLock.Unlock()
 	v.unverifiedTxs = append(v.unverifiedTxs, txs...)
 }
 
-func (v *LegacyExecutorVerifier) GetTxs() []types.Transaction {
-	v.txsLock.Lock()
-	defer v.txsLock.Unlock()
-	result := make([]types.Transaction, len(v.unverifiedTxs))
-	copy(result, v.unverifiedTxs)
+func (v *LegacyExecutorVerifier) AddVerifiedTx(tx types.Transaction) {
+	v.vtxsLock.Lock()
+	defer v.vtxsLock.Unlock()
+	v.verifiedTxs = append(v.verifiedTxs, tx)
+}
+
+func (v *LegacyExecutorVerifier) GetTxsForPool() []types.Transaction {
+	v.uvtxsLock.Lock()
+	defer v.uvtxsLock.Unlock()
+	// [limbo] return all txs which were successful or not tested to be added back to the pool
+	v.unverifiedTxs = append(v.unverifiedTxs, v.verifiedTxs...)
+	return v.unverifiedTxs
+}
+
+func (v *LegacyExecutorVerifier) GetNextTx() []types.Transaction {
+	v.uvtxsLock.Lock()
+	defer v.uvtxsLock.Unlock()
+	if len(v.unverifiedTxs) == 0 {
+		return nil
+	}
+	result := make([]types.Transaction, 1)
+	copy(result, v.unverifiedTxs[:1])
+	v.unverifiedTxs = v.unverifiedTxs[1:]
 	return result
 }
 
 func (v *LegacyExecutorVerifier) ClearTxs() {
-	v.txsLock.Lock()
-	defer v.txsLock.Unlock()
+	v.uvtxsLock.Lock()
+	defer v.uvtxsLock.Unlock()
 	v.unverifiedTxs = make([]types.Transaction, 0)
 }

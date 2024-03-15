@@ -1,7 +1,6 @@
 package legacy_executor_verifier
 
 import (
-	"github.com/ledgerwatch/erigon/core/types"
 	"sync"
 )
 
@@ -9,7 +8,6 @@ type Limbo struct {
 	inLimboMode bool
 	batchNo     uint64 // the lowest failing batch
 	m           sync.Mutex
-	txs         []types.Transaction
 }
 
 func NewLimbo() *Limbo {

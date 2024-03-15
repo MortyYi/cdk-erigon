@@ -175,25 +175,15 @@ func SpawnSequencingStage(
 
 	limboMode, _ := cfg.limbo.CheckLimboMode()
 	if limboMode {
-		log.Info(fmt.Sprintf("[%s] Limbo mode detected, skipping sequencing", logPrefix))
-		// TODO: improve this - we should enter limbo mode, then start going tx by tx and identify the 'naughty' tx
-		// figure out which stages should just return when we're in this mode - we have everything we need from the txpool
-		startedInLimbo = true
-	}
-
-	if startedInLimbo {
 		log.Info(fmt.Sprintf("[%s] Limbo mode detected, sequencing one by one", logPrefix))
-
-		// ensure to stop the verifier from processing any more requests (/)
-		// do the flow below, but 1 tx at a time (yield 1) -> yield only 1 tx from the pool (/)
-		// execute the verifier directly and synchronously ()
-		// if the verifier fails, we need to remove the tx from the pool and then continue ()
-		// exit limbo mode leaving the other txs in the pool - maybe we have to put some back?
-		// - txs recently yielded but not in verified batches should be held in the checker/txpool somewhere - so that we can later process them through and remove the 'bad one'
+		startedInLimbo = true
 	}
 
 	freshTx := tx == nil
 	if freshTx {
+		if limboMode {
+			return errors.New("cannot start sequencing in limbo mode with no transaction")
+		}
 		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
 			return err
@@ -313,12 +303,16 @@ LOOP:
 		select {
 		case <-ticker.C:
 			log.Info(fmt.Sprintf("[%s] Waiting some more for txs from the pool...", logPrefix))
+			inLimbo, _ := cfg.limbo.CheckLimboMode()
+			if inLimbo && !startedInLimbo {
+				return nil // force the stages to advance so we can start this stage in limbo
+			}
 		default:
 			var transactions []types.Transaction
-			// [limbo] -
+			// [limbo] - build batch of 1 block with 1 tx and run 1 at a time
 			if startedInLimbo {
-				// get all the txs we need to process 1 by 1
-				transactions = cfg.verifier.GetTxs()
+				// get the next unverified tx - add to verified list once we've checked it against the executor
+				transactions = cfg.verifier.GetNextTx()
 			} else {
 				cfg.txPool.LockFlusher()
 				transactions, err = getNextTransactions(cfg, executionAt, forkId, yielded, startedInLimbo)
@@ -326,8 +320,8 @@ LOOP:
 					return err
 				}
 				cfg.txPool.UnlockFlusher()
-				// [limbo] - add txs so we can put them back in the pool if needs be
-				cfg.verifier.AddTxs(transactions)
+				// [limbo] - add txs so we can put them back in the pool later if we go into limbo
+				cfg.verifier.AddUnverifiedTxs(transactions)
 			}
 
 			if startedInLimbo {
@@ -340,7 +334,13 @@ LOOP:
 					enteredLimbo, _ := cfg.limbo.CheckLimboMode()
 					if enteredLimbo {
 						log.Info(fmt.Sprintf("[%s] Limbo mode entered whilst executing, skipping sequencing", logPrefix))
-						break LOOP
+						// commit the dbtx and get outa here
+						if freshTx {
+							if err = tx.Commit(); err != nil {
+								return err
+							}
+						}
+						return
 					}
 				}
 				snap := ibs.Snapshot()

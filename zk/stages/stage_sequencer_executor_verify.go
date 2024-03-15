@@ -15,6 +15,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/zkevm/log"
 )
 
 type SequencerExecutorVerifyCfg struct {
@@ -64,6 +65,10 @@ func SpawnSequencerExecutorVerifyStage(
 	}
 
 	inLimbo, limboBatch := cfg.limbo.CheckLimboMode()
+
+	if inLimbo {
+		log.Info("in limbo mode", "batch", limboBatch)
+	}
 
 	// [limbo] if not in limbo, then send via channel
 	if !inLimbo {
@@ -165,7 +170,7 @@ func SpawnSequencerExecutorVerifyStage(
 			}
 
 			if inLimbo {
-				result, err2 := cfg.verifier.VerifySynchronously(&legacy_executor_verifier.VerifierRequest{BatchNumber: batch, StateRoot: block.Root()})
+				result, err2 := cfg.verifier.VerifySynchronously(tx, &legacy_executor_verifier.VerifierRequest{BatchNumber: batch, StateRoot: block.Root()})
 				if err2 != nil {
 					return err2
 				}
@@ -178,7 +183,7 @@ func SpawnSequencerExecutorVerifyStage(
 
 					tx0 := txs[0]
 
-					vtxs := cfg.verifier.GetTxs()
+					vtxs := cfg.verifier.GetTxsForPool()
 
 					// find and remove tx from vtxs
 					for i, vtx := range vtxs {
