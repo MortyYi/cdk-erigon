@@ -232,11 +232,13 @@ func (v *LegacyExecutorVerifier) handleRequest(ctx context.Context, request *Ver
 	// TODO [limbo]: later enable this once limbo is working
 	//// if the verification failed, then set limbo state to true - the node is 'in limbo' but won't do anything about it until executor verification stage
 	//// TODO: perhaps we can remove this from here and allow the verification stage alone to deal with it
-	//if !success {
-	//	inLimbo, _ := v.limbo.CheckLimboMode()
-	//	if !inLimbo {
-	//		log.Debug("entering limbo!!!!!!")
-	//		v.limbo.EnterLimboMode(request.BatchNumber)
+	if !success {
+		inLimbo, _ := v.limbo.CheckLimboMode()
+		if !inLimbo {
+			log.Debug("entering limbo!!!!!!")
+			v.limbo.EnterLimboMode(request.BatchNumber)
+		}
+	}
 	//
 	//		// stop work and empty requests
 	//		v.StopWork()
@@ -322,19 +324,19 @@ func (v *LegacyExecutorVerifier) handleRequestSynchronously(ctx context.Context,
 
 	// if the verification failed, then set limbo state to true - the node is 'in limbo' but won't do anything about it until executor verification stage
 	// TODO: perhaps we can remove this from here and allow the verification stage alone to deal with it
-	if !success {
-		inLimbo, _ := v.limbo.CheckLimboMode()
-		if !inLimbo {
-			log.Debug("entering limbo!!!!!!")
-			v.limbo.EnterLimboMode(request.BatchNumber)
-
-			// stop work and empty requests
-			v.StopWork()
-			close(v.requestChan)
-			for range v.requestChan {
-			}
-		}
-	}
+	//if !success {
+	//	inLimbo, _ := v.limbo.CheckLimboMode()
+	//	if !inLimbo {
+	//		log.Debug("entering limbo!!!!!!")
+	//		v.limbo.EnterLimboMode(request.BatchNumber)
+	//
+	//		// stop work and empty requests
+	//		v.StopWork()
+	//		close(v.requestChan)
+	//		for range v.requestChan {
+	//		}
+	//	}
+	//}
 
 	response := &VerifierResponse{
 		BatchNumber: request.BatchNumber,

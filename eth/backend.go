@@ -763,7 +763,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 				// TODO [limbo] - can remove after development
 				if len(cfg.ExecutorUrls) == 1 && cfg.ExecutorUrls[0] == "predictable" {
-					executors := legacy_executor_verifier.NewExecutorPredictables(10)
+					executors := legacy_executor_verifier.NewExecutorPredictables(1)
 					for _, e := range executors {
 						legacyExecutors = append(legacyExecutors, e)
 					}
@@ -801,6 +801,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 				backend.dataStream,
 				backend.l1Syncer,
 				backend.txPool2,
+				backend.txPool2GrpcServer,
 				backend.txPool2DB,
 				verifier,
 				backend.limbo,

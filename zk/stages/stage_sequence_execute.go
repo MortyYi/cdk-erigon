@@ -313,6 +313,12 @@ LOOP:
 			if startedInLimbo {
 				// get the next unverified tx - add to verified list once we've checked it against the executor
 				transactions = cfg.verifier.GetNextTx()
+				if len(transactions) == 0 {
+					// [limbo] move the stages on, we're done!
+					// TODO: exit limbo only when we have verified the txs and removed any bad ones - in verify stage
+					cfg.limbo.ExitLimboMode()
+					return nil
+				}
 			} else {
 				cfg.txPool.LockFlusher()
 				transactions, err = getNextTransactions(cfg, executionAt, forkId, yielded, startedInLimbo)
@@ -329,20 +335,21 @@ LOOP:
 			}
 
 			for _, transaction := range transactions {
+				// todo: [limbo] maybe useful when asynchronously entering limbo
 				// [limbo] - break from processing txs as soon as verification failure occurs
-				if !startedInLimbo {
-					enteredLimbo, _ := cfg.limbo.CheckLimboMode()
-					if enteredLimbo {
-						log.Info(fmt.Sprintf("[%s] Limbo mode entered whilst executing, skipping sequencing", logPrefix))
-						// commit the dbtx and get outa here
-						if freshTx {
-							if err = tx.Commit(); err != nil {
-								return err
-							}
-						}
-						return
-					}
-				}
+				//if !startedInLimbo {
+				//	enteredLimbo, _ := cfg.limbo.CheckLimboMode()
+				//	if enteredLimbo {
+				//		log.Info(fmt.Sprintf("[%s] Limbo mode entered whilst executing, skipping sequencing", logPrefix))
+				//		// commit the dbtx and get outa here
+				//		if freshTx {
+				//			if err = tx.Commit(); err != nil {
+				//				return err
+				//			}
+				//		}
+				//		return
+				//	}
+				//}
 				snap := ibs.Snapshot()
 				receipt, overflow, err := attemptAddTransaction(tx, cfg, batchCounters, header, parentBlock.Header(), transaction, ibs, hermezDb)
 				if err != nil {

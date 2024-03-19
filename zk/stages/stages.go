@@ -101,7 +101,7 @@ func SequencerZkStages(
 				return SpawnSequencerInterhashesStage(s, u, tx, ctx, sequencerInterhashesCfg, firstCycle, quiet)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
-				return UnwindSequencerInterhashsStage(u, s, tx, ctx, sequencerInterhashesCfg, firstCycle)
+				return UnwindSequencerInterhashesStage(u, s, tx, ctx, sequencerInterhashesCfg, firstCycle)
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
 				return PruneSequencerInterhashesStage(p, tx, sequencerInterhashesCfg, ctx, firstCycle)
@@ -487,6 +487,7 @@ var AllStagesZk = []stages2.SyncStage{
 var ZkSequencerUnwindOrder = stages.UnwindOrder{
 	stages2.IntermediateHashes, // need to unwind SMT before we remove history
 	stages2.Execution,
+	stages2.SequenceExecutorVerify, // [limbo] todo - this stage can probably manage it's own lifecycle...
 	stages2.HashState,
 	stages2.CallTraces,
 	stages2.AccountHistoryIndex,

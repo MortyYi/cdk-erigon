@@ -20,6 +20,7 @@ import (
 	zkStages "github.com/ledgerwatch/erigon/zk/stages"
 	"github.com/ledgerwatch/erigon/zk/syncer"
 	"github.com/ledgerwatch/erigon/zk/txpool"
+	txPoolProto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 )
 
 // NewDefaultZkStages creates stages for zk syncer (RPC mode)
@@ -96,6 +97,7 @@ func NewSequencerZkStages(ctx context.Context,
 	datastreamServer *datastreamer.StreamServer,
 	l1Syncer *syncer.L1Syncer,
 	txPool *txpool.TxPool,
+	txPoolServer txPoolProto.TxpoolServer,
 	txPoolDb kv.RwDB,
 	verifier *legacy_executor_verifier.LegacyExecutorVerifier,
 	limbo *legacy_executor_verifier.Limbo,
@@ -111,7 +113,7 @@ func NewSequencerZkStages(ctx context.Context,
 		stagedsync.StageCumulativeIndexCfg(db),
 		zkStages.StageL1SequencerSyncCfg(db, cfg.Zk, l1Syncer),
 		zkStages.StageDataStreamCatchupCfg(datastreamServer, db, cfg.Genesis.Config.ChainID.Uint64()),
-		zkStages.StageSequencerInterhashesCfg(db, notifications.Accumulator),
+		zkStages.StageSequencerInterhashesCfg(db, notifications.Accumulator, blockReader),
 		zkStages.StageSequenceBlocksCfg(
 			db,
 			cfg.Prune,
@@ -137,7 +139,7 @@ func NewSequencerZkStages(ctx context.Context,
 		),
 		stagedsync.StageHashStateCfg(db, dirs, cfg.HistoryV3, agg),
 		zkStages.StageZkInterHashesCfg(db, true, true, false, dirs.Tmp, blockReader, controlServer.Hd, cfg.HistoryV3, agg, cfg.Zk),
-		zkStages.StageSequencerExecutorVerifyCfg(db, verifier, limbo),
+		zkStages.StageSequencerExecutorVerifyCfg(db, verifier, txPoolServer, limbo),
 		stagedsync.StageHistoryCfg(db, cfg.Prune, dirs.Tmp),
 		stagedsync.StageLogIndexCfg(db, cfg.Prune, dirs.Tmp),
 		stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, dirs.Tmp),

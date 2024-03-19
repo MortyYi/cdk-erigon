@@ -2,6 +2,7 @@ package legacy_executor_verifier
 
 import (
 	"sync"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type Limbo struct {
@@ -31,6 +32,7 @@ func (l *Limbo) EnterLimboMode(batchNo uint64) {
 func (l *Limbo) ExitLimboMode() {
 	l.m.Lock()
 	defer l.m.Unlock()
+	log.Info("Exiting limbo mode")
 	l.batchNo = 0
 	l.inLimboMode = false
 }

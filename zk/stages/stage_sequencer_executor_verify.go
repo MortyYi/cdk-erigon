@@ -10,29 +10,30 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/erigon/zk/legacy_executor_verifier"
-	"github.com/ledgerwatch/erigon/zk/txpool"
 	"fmt"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/zkevm/log"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	"bytes"
 )
 
 type SequencerExecutorVerifyCfg struct {
 	db       kv.RwDB
 	verifier *legacy_executor_verifier.LegacyExecutorVerifier
-	txPool   *txpool.TxPool
+	txPool   txpool.TxpoolServer
 	limbo    *legacy_executor_verifier.Limbo
 }
 
 func StageSequencerExecutorVerifyCfg(
 	db kv.RwDB,
 	verifier *legacy_executor_verifier.LegacyExecutorVerifier,
+	txPool txpool.TxpoolServer,
 	limbo *legacy_executor_verifier.Limbo,
 ) SequencerExecutorVerifyCfg {
 	return SequencerExecutorVerifyCfg{
 		db:       db,
 		verifier: verifier,
+		txPool:   txPool,
 		limbo:    limbo,
 	}
 }
@@ -192,14 +193,26 @@ func SpawnSequencerExecutorVerifyStage(
 						}
 					}
 
-					// add valid/assumed valid txs back to the txpool
-					slots, err := addTransactionsToSlots(vtxs)
-					if err != nil {
-						return err
+					// encode to rlp
+					rlpTxs := make([][]byte, len(vtxs))
+					for i, vtx := range vtxs {
+						writer := new(bytes.Buffer)
+						err := vtx.EncodeRLP(writer)
+						if err != nil {
+							return err
+						}
+						rlpTxs[i] = writer.Bytes()
 					}
-					_, err = cfg.txPool.AddLocalTxs(ctx, slots, tx)
-					if err != nil {
-						return err
+
+					if len(vtxs) > 0 {
+						// add valid/assumed valid txs back to the txpool
+						addReq := &txpool.AddRequest{
+							RlpTxs: rlpTxs,
+						}
+						_, err = cfg.txPool.Add(ctx, addReq)
+						if err != nil {
+							return err
+						}
 					}
 
 					cfg.verifier.ClearTxs()
@@ -236,7 +249,7 @@ func UnwindSequencerExecutorVerifyStage(
 	cfg SequencerExecutorVerifyCfg,
 	initialCycle bool,
 ) error {
-	// TODO [limbo] implement unwind
+	// TODO [limbo] implement unwind - do we need it? this only has stage progress...
 	return nil
 }
 
@@ -248,14 +261,4 @@ func PruneSequencerExecutorVerifyStage(
 	initialCycle bool,
 ) error {
 	return nil
-}
-
-func addTransactionsToSlots(transactions []types.Transaction) (types2.TxSlots, error) {
-	// todo [limbo] finish implementation
-	slot := types2.TxSlots{
-		Txs:     nil,
-		Senders: nil,
-		IsLocal: nil,
-	}
-	return slot, nil
 }
