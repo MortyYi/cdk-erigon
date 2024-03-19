@@ -731,7 +731,7 @@ func (cc *CounterCollector) multiCall(call func(), times int) {
 	}
 }
 
-func (cc *CounterCollector) preSha256(callDataLength uint64) {
+func (cc *CounterCollector) preSha256(callDataLength int) {
 	cc.Deduct(S, 100)
 	cc.Deduct(B, 1)
 	cc.Deduct(SHA, int(math.Ceil(float64(callDataLength+1)/64)))

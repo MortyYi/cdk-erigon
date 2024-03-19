@@ -321,7 +321,10 @@ LOOP:
 		}
 	}
 
-	counters := batchCounters.CombineCollectors()
+	counters, err := batchCounters.CombineCollectors()
+	if err != nil {
+		return err
+	}
 	log.Info("counters consumed", "counts", counters.UsedAsString())
 
 	l1BlockHash := common.Hash{}
@@ -723,7 +726,7 @@ func attemptAddTransaction(
 
 	ibs.Prepare(transaction.Hash(), common.Hash{}, 0)
 
-	receipt, returnData, err := core.ApplyTransaction(
+	receipt, execResult, err := core.ApplyTransaction_zkevm(
 		cfg.chainConfig,
 		core.GetHashFn(header, getHeader),
 		cfg.engine,
@@ -734,7 +737,7 @@ func attemptAddTransaction(
 		header,
 		transaction,
 		&header.GasUsed,
-		cfg.zkVmConfig.Config,
+		*cfg.zkVmConfig,
 		parentHeader.ExcessDataGas,
 		zktypes.EFFECTIVE_GAS_PRICE_PERCENTAGE_MAXIMUM)
 
@@ -748,13 +751,13 @@ func attemptAddTransaction(
 		return nil, false, err
 	}
 
-	err = txCounters.ProcessTx(ibs, returnData)
+	err = txCounters.ProcessTx(ibs, execResult.ReturnData)
 	if err != nil {
 		return nil, false, err
 	}
 
 	// now that we have executed we can check again for an overflow
-	overflow = batchCounters.CheckForOverflow()
+	overflow, err = batchCounters.CheckForOverflow()
 
 	return receipt, overflow, err
 }

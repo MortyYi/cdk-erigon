@@ -21,6 +21,8 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	"github.com/ledgerwatch/erigon/chain"
 )
 
 // [zkevm] contains the list of zkevm precompiles
@@ -36,6 +38,24 @@ func (evm *EVM) precompile(addr libcommon.Address) (PrecompiledContract, bool) {
 	}
 	p, ok := precompiles[addr]
 	return p, ok
+}
+
+// NewEVM returns a new EVM. The returned EVM is not thread safe and should
+// only ever be used *once*.
+func NewZkEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmtypes.IntraBlockState, chainConfig *chain.Config, zkVmConfig ZkConfig) *EVM {
+	evm := &EVM{
+		context:         blockCtx,
+		txContext:       txCtx,
+		intraBlockState: state,
+		config:          zkVmConfig.Config,
+		chainConfig:     chainConfig,
+		chainRules:      chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time),
+	}
+
+	// [zkevm] change
+	evm.interpreter = NewZKEVMInterpreter(evm, zkVmConfig)
+
+	return evm
 }
 
 // create creates a new contract using code as deployment code.

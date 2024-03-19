@@ -1,11 +1,11 @@
 package vm
 
 import (
-	"bytes"
 	"fmt"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"math"
+	"github.com/ledgerwatch/erigon/zk/tx"
 )
 
 type TransactionCounter struct {
@@ -32,9 +32,7 @@ func NewTransactionCounter(transaction types.Transaction, smtMaxLevel uint32) *T
 }
 
 func (tc *TransactionCounter) CalculateRlp() error {
-	var rlpBytes []byte
-	buffer := bytes.NewBuffer(rlpBytes)
-	err := tc.transaction.EncodeRLP(buffer)
+	raw, err := tx.TransactionToL2Data(tc.transaction, 8, tx.MaxEffectivePercentage)
 	if err != nil {
 		return err
 	}
@@ -45,8 +43,8 @@ func (tc *TransactionCounter) CalculateRlp() error {
 	chainIdHex := fmt.Sprintf("%x", tc.transaction.GetChainID().Uint64())
 	nonceHex := fmt.Sprintf("%x", tc.transaction.GetNonce())
 
-	txRlpLength := len(rlpBytes)
-	txDataLen := len(rlpBytes)
+	txRlpLength := len(raw)
+	txDataLen := len(tc.transaction.GetData())
 	gasLimitLength := len(gasLimitHex) / 2
 	gasPriceLength := len(gasPriceHex) / 2
 	valueLength := len(valueHex) / 2
@@ -128,7 +126,11 @@ func (tc *TransactionCounter) ProcessTx(ibs *state.IntraBlockState, returnData [
 	cc.divArith()
 	cc.multiCall(cc.mulArith, 4)
 	cc.fillBlockInfoTreeWithTxReceipt(tc.smtLevels)
+
+	// we always send false for isCreate and isCreate2 here as the original JS does the same
 	cc.processContractCall(tc.smtLevels, byteCodeLength, isDeploy, false, false)
+
+	tc.processingCounters = cc
 
 	return nil
 }
@@ -137,6 +139,6 @@ func (tc *TransactionCounter) ExecutionCounters() *CounterCollector {
 	return tc.executionCounters
 }
 
-func (tc *TransactionCounter) ProcessingCounters() *CounterCollector {
-	return tc.processingCounters
+func (tx *TransactionCounter) ProcessingCounters() *CounterCollector {
+	return tx.processingCounters
 }

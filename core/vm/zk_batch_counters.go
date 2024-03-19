@@ -31,24 +31,20 @@ func NewBatchCounterCollector(smtMaxLevel uint32, forkId uint16) *BatchCounterCo
 // every time a new transaction is added as it needs to take into account all the transactions in a batch.
 // The function will return false in the case of an error or an overflow of counters
 func (bcc *BatchCounterCollector) AddNewTransactionCounters(txCounters *TransactionCounter) (bool, error) {
-	bcc.transactions = append(bcc.transactions, txCounters)
-
-	if err := bcc.processBatchLevelData(); err != nil {
-		return true, err
-	}
-
 	err := txCounters.CalculateRlp()
 	if err != nil {
 		return true, err
 	}
 
-	return bcc.CheckForOverflow(), nil
+	bcc.transactions = append(bcc.transactions, txCounters)
+
+	return bcc.CheckForOverflow()
 }
 
 // StartNewBlock adds in the counters to simulate a changeL2Block transaction.  As these transactions don't really exist
 // in a context that isn't the prover we just want to mark down that we have started one.  If adding one causes an overflow we
 // return true
-func (bcc *BatchCounterCollector) StartNewBlock() bool {
+func (bcc *BatchCounterCollector) StartNewBlock() (bool, error) {
 	bcc.blockCount++
 	return bcc.CheckForOverflow()
 }
@@ -88,21 +84,28 @@ func (bcc *BatchCounterCollector) processBatchLevelData() error {
 }
 
 // CheckForOverflow returns true in the case that any counter has less than 0 remaining
-func (bcc *BatchCounterCollector) CheckForOverflow() bool {
-	combined := bcc.CombineCollectors()
+func (bcc *BatchCounterCollector) CheckForOverflow() (bool, error) {
+	combined, err := bcc.CombineCollectors()
+	if err != nil {
+		return false, err
+	}
 	for _, v := range combined {
 		if v.remaining < 0 {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 // CombineCollectors takes the batch level data from all transactions and combines these counters with each transactions'
 // rlp level counters and execution level counters
-func (bcc *BatchCounterCollector) CombineCollectors() Counters {
+func (bcc *BatchCounterCollector) CombineCollectors() (Counters, error) {
 	// combine all the counters we have so far
 	combined := defaultCounters()
+
+	if err := bcc.processBatchLevelData(); err != nil {
+		return nil, err
+	}
 
 	// these counter collectors can be re-used for each new block in the batch as they don't rely on inputs
 	// from the block or transactions themselves
@@ -146,5 +149,5 @@ func (bcc *BatchCounterCollector) CombineCollectors() Counters {
 		}
 	}
 
-	return combined
+	return combined, nil
 }

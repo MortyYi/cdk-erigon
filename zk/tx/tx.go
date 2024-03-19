@@ -65,7 +65,7 @@ func DecodeTxs(txsData []byte, forkID uint64) ([]types.Transaction, []byte, []ui
 		}
 
 		// if num is 11 then we are trying to parse a `changeL2Block` transaction so skip it
-		if num == changeL2BlockTransactionId {
+		if num == changeL2BlockTxType {
 			pos += 9
 			continue
 		}
