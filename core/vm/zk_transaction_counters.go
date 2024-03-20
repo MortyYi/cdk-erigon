@@ -40,10 +40,15 @@ func (tc *TransactionCounter) CalculateRlp() error {
 	}
 
 	gasLimitHex := fmt.Sprintf("%x", tc.transaction.GetGas())
+	addLeadingZeroToHexValue(&gasLimitHex)
 	gasPriceHex := fmt.Sprintf("%x", tc.transaction.GetPrice().Uint64())
+	addLeadingZeroToHexValue(&gasPriceHex)
 	valueHex := fmt.Sprintf("%x", tc.transaction.GetValue().Uint64())
+	addLeadingZeroToHexValue(&valueHex)
 	chainIdHex := fmt.Sprintf("%x", tc.transaction.GetChainID().Uint64())
+	addLeadingZeroToHexValue(&chainIdHex)
 	nonceHex := fmt.Sprintf("%x", tc.transaction.GetNonce())
+	addLeadingZeroToHexValue(&nonceHex)
 
 	txRlpLength := len(raw)
 	txDataLen := len(tc.transaction.GetData())
@@ -159,4 +164,10 @@ func (tc *TransactionCounter) GetDecodedV(v *uint256.Int) *uint256.Int {
 
 	return result
 
+}
+
+func addLeadingZeroToHexValue(value *string) {
+	if (len(*value) & 1) == 1 {
+		*value = fmt.Sprintf("0%s", *value)
+	}
 }
