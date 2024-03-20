@@ -7,7 +7,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/zk/tx"
+	"bytes"
 )
 
 type TransactionCounter struct {
@@ -34,10 +34,9 @@ func NewTransactionCounter(transaction types.Transaction, smtMaxLevel uint32) *T
 }
 
 func (tc *TransactionCounter) CalculateRlp() error {
-	raw, err := tx.TransactionToL2Data(tc.transaction, 8, tx.MaxEffectivePercentage)
-	if err != nil {
-		return err
-	}
+	var rlpBytes []byte
+	buffer := bytes.NewBuffer(rlpBytes)
+	err := tc.transaction.EncodeRLP(buffer)
 
 	gasLimitHex := fmt.Sprintf("%x", tc.transaction.GetGas())
 	addLeadingZeroToHexValue(&gasLimitHex)
@@ -50,7 +49,7 @@ func (tc *TransactionCounter) CalculateRlp() error {
 	nonceHex := fmt.Sprintf("%x", tc.transaction.GetNonce())
 	addLeadingZeroToHexValue(&nonceHex)
 
-	txRlpLength := len(raw)
+	txRlpLength := len(buffer.Bytes())
 	txDataLen := len(tc.transaction.GetData())
 	gasLimitLength := len(gasLimitHex) / 2
 	gasPriceLength := len(gasPriceHex) / 2
@@ -62,8 +61,8 @@ func (tc *TransactionCounter) CalculateRlp() error {
 	collector.Deduct(S, 250)
 	collector.Deduct(B, 1+1)
 	collector.Deduct(K, int(math.Ceil(float64(txRlpLength+1)/136)))
-	collector.Deduct(P, int(math.Ceil(float64(txRlpLength+1)/56)))
-	collector.Deduct(D, int(math.Ceil(float64(txRlpLength+1)/56)))
+	collector.Deduct(P, int(math.Ceil(float64(txRlpLength+1)/56)+3))
+	collector.Deduct(D, int(math.Ceil(float64(txRlpLength+1)/56)+3))
 	collector.multiCall(collector.addBatchHashData, 21)
 	/**
 	from the original JS implementation:
