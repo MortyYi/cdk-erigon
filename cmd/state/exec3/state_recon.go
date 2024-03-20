@@ -27,8 +27,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	eridb "github.com/ledgerwatch/erigon/smt/pkg/db"
-	"github.com/ledgerwatch/erigon/smt/pkg/smt"
 )
 
 type ScanWorker struct {
@@ -299,11 +297,7 @@ func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) error {
 	if txTask.BlockNum == 0 && txTask.TxIndex == -1 {
 		//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
 		// Genesis block
-		d := eridb.NewMemDb()
-		sparseTree := smt.NewSMT(d)
-		_, ibs, err = core.GenesisToBlock(rw.genesis, sparseTree, "")
-		sparseTree = nil
-		d = nil
+		_, ibs, _, err = core.GenesisToBlock(rw.genesis, "")
 		if err != nil {
 			return err
 		}

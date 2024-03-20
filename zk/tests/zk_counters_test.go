@@ -24,8 +24,6 @@ import (
 	seq "github.com/ledgerwatch/erigon/zk/sequencer"
 	"errors"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	eridb "github.com/ledgerwatch/erigon/smt/pkg/db"
-	"github.com/ledgerwatch/erigon/smt/pkg/smt"
 )
 
 const root = "./testdata/counters"
@@ -156,9 +154,7 @@ func runTest(t *testing.T, test vector, err error, fileName string) {
 		},
 	}
 
-	d := eridb.NewMemDb()
-	sparseTree := smt.NewSMT(d)
-	genesisBlock, _, err := core.WriteGenesisState(genesis, sparseTree, tx, "./temp")
+	genesisBlock, _, sparseTree, err := core.WriteGenesisState(genesis, tx, "./temp")
 	if err != nil {
 		t.Fatal(err)
 	}
