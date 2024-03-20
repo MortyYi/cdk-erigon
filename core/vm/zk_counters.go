@@ -72,7 +72,11 @@ type CounterCollector struct {
 }
 
 func calculateSmtLevels(smtMaxLevel uint32) int {
-	return len(strconv.FormatInt(int64(math.Pow(2, float64(smtMaxLevel))+250000), 2))
+	binaryLength := len(strconv.FormatInt(int64(math.Pow(2, float64(smtMaxLevel))+50_000), 2))
+	if binaryLength < 32 {
+		binaryLength = 32
+	}
+	return binaryLength
 }
 
 func NewCounterCollector(smtLevels int) *CounterCollector {

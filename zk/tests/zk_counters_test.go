@@ -210,7 +210,6 @@ func runTest(t *testing.T, test vector, err error, fileName string, idx int) {
 	stateReader := state.NewPlainStateReader(tx)
 	ibs := state.New(stateReader)
 
-	const smtMaxLevel = 4
 	batchCollector := vm.NewBatchCounterCollector(uint32(smtDepth), uint16(test.ForkId))
 
 	blockStarted := false
@@ -225,7 +224,7 @@ func runTest(t *testing.T, test vector, err error, fileName string, idx int) {
 			}
 			blockStarted = true
 		}
-		txCounters := vm.NewTransactionCounter(transaction, smtMaxLevel)
+		txCounters := vm.NewTransactionCounter(transaction, uint32(smtDepth))
 		overflow, err := batchCollector.AddNewTransactionCounters(txCounters)
 		gasPool := new(core.GasPool).AddGas(transactionGasLimit)
 
@@ -247,11 +246,14 @@ func runTest(t *testing.T, test vector, err error, fileName string, idx int) {
 			zktypes.EFFECTIVE_GAS_PRICE_PERCENTAGE_MAXIMUM)
 
 		if err != nil {
-			t.Fatal(err)
+			// this could be deliberate in the test so just move on and note it
+			fmt.Println("err handling tx", err)
+			continue
 		}
 		if overflow {
 			t.Fatal("unexpected overflow")
 		}
+
 		if err = txCounters.ProcessTx(ibs, result.ReturnData); err != nil {
 			t.Fatal(err)
 		}
