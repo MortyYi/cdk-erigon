@@ -24,6 +24,8 @@ import (
 	seq "github.com/ledgerwatch/erigon/zk/sequencer"
 	"errors"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	eridb "github.com/ledgerwatch/erigon/smt/pkg/db"
+	"github.com/ledgerwatch/erigon/smt/pkg/smt"
 )
 
 const root = "./testdata/counters"
@@ -56,6 +58,8 @@ type vector struct {
 	SequencerAddress string `json:"sequencerAddress"`
 	ChainId          int64  `json:"chainID"`
 	ForkId           uint64 `json:"forkID"`
+	ExpectedOldRoot  string `json:"expectedOldRoot"`
+	ExpectedNewRoot  string `json:"expectedNewRoot"`
 }
 
 func Test_RunTestVectors(t *testing.T) {
@@ -86,11 +90,13 @@ func Test_RunTestVectors(t *testing.T) {
 	}
 
 	for idx, test := range tests {
-		runTest(t, test, err, fileNames, idx)
+		t.Run(fileNames[idx], func(t *testing.T) {
+			runTest(t, test, err, fileNames[idx])
+		})
 	}
 }
 
-func runTest(t *testing.T, test vector, err error, fileNames []string, idx int) {
+func runTest(t *testing.T, test vector, err error, fileName string) {
 	test.BatchL2DataDecoded, err = hex.DecodeHex(test.BatchL2Data)
 	if err != nil {
 		t.Fatal(err)
@@ -101,7 +107,7 @@ func runTest(t *testing.T, test vector, err error, fileNames []string, idx int) 
 		t.Fatal(err)
 	}
 	if len(decodedTransactions) == 0 {
-		fmt.Printf("found no transactions in file %s", fileNames[idx])
+		fmt.Printf("found no transactions in file %s", fileName)
 	}
 
 	db, tx := memdb.NewTestTx(t)
@@ -150,9 +156,18 @@ func runTest(t *testing.T, test vector, err error, fileNames []string, idx int) 
 		},
 	}
 
-	_, _, err = core.WriteGenesisState(genesis, tx, "./temp")
+	d := eridb.NewMemDb()
+	sparseTree := smt.NewSMT(d)
+	genesisBlock, _, err := core.WriteGenesisState(genesis, sparseTree, tx, "./temp")
 	if err != nil {
 		t.Fatal(err)
+	}
+	smtDepth := sparseTree.GetDepth()
+
+	genesisRoot := genesisBlock.Root()
+	expectedGenesisRoot := common.HexToHash(test.ExpectedNewRoot)
+	if genesisRoot != expectedGenesisRoot {
+		t.Fatal("genesis root did not match expected")
 	}
 
 	sequencer := common.HexToAddress(test.SequencerAddress)
@@ -200,7 +215,7 @@ func runTest(t *testing.T, test vector, err error, fileNames []string, idx int) 
 	ibs := state.New(stateReader)
 
 	const smtMaxLevel = 4
-	batchCollector := vm.NewBatchCounterCollector(smtMaxLevel, uint16(test.ForkId))
+	batchCollector := vm.NewBatchCounterCollector(uint32(smtDepth), uint16(test.ForkId))
 
 	blockStarted := false
 	for _, transaction := range decodedTransactions {
@@ -280,7 +295,7 @@ func runTest(t *testing.T, test vector, err error, fileNames []string, idx int) 
 	}
 
 	if len(errors) > 0 {
-		t.Errorf("problems in file %s \n", fileNames[idx])
+		t.Errorf("problems in file %s \n", fileName)
 		for _, e := range errors {
 			fmt.Println(e)
 		}

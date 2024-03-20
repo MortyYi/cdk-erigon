@@ -119,6 +119,7 @@ import (
 	txpool2 "github.com/ledgerwatch/erigon/zk/txpool"
 	"github.com/ledgerwatch/erigon/zk/witness"
 	"github.com/ledgerwatch/erigon/zkevm/etherman"
+	"github.com/ledgerwatch/erigon/smt/pkg/smt"
 )
 
 // Config contains the configuration options of the ETH protocol.
@@ -239,7 +240,11 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			genesisSpec = nil
 		}
 		var genesisErr error
-		chainConfig, genesis, genesisErr = core.WriteGenesisBlock(tx, genesisSpec, config.OverrideShanghaiTime, tmpdir)
+		d := db.NewMemDb()
+		sparseTree := smt.NewSMT(d)
+		chainConfig, genesis, genesisErr = core.WriteGenesisBlock(tx, genesisSpec, config.OverrideShanghaiTime, sparseTree, tmpdir)
+		sparseTree = nil
+		d = nil
 		if _, ok := genesisErr.(*erigonchain.ConfigCompatError); genesisErr != nil && !ok {
 			return genesisErr
 		}

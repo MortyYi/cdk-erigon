@@ -49,8 +49,8 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/params/networkname"
-	"github.com/ledgerwatch/erigon/smt/pkg/db"
 	"github.com/ledgerwatch/erigon/smt/pkg/smt"
+	eridb "github.com/ledgerwatch/erigon/smt/pkg/db"
 	"golang.org/x/exp/slices"
 )
 
@@ -77,7 +77,12 @@ func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, override
 		return nil, nil, err
 	}
 	defer tx.Rollback()
-	c, b, err := WriteGenesisBlock(tx, genesis, overrideShanghaiTime, tmpDir)
+
+	d := eridb.NewMemDb()
+	s := smt.NewSMT(d)
+	c, b, err := WriteGenesisBlock(tx, genesis, overrideShanghaiTime, s, tmpDir)
+	s = nil
+	d = nil
 	if err != nil {
 		return c, b, err
 	}
@@ -88,7 +93,7 @@ func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, override
 	return c, b, nil
 }
 
-func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideShanghaiTime *big.Int, tmpDir string) (*chain.Config, *types.Block, error) {
+func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideShanghaiTime *big.Int, sparseTree *smt.SMT, tmpDir string) (*chain.Config, *types.Block, error) {
 	if genesis != nil && genesis.Config == nil {
 		return params.AllProtocolChanges, nil, types.ErrGenesisNoConfig
 	}
@@ -121,7 +126,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideShanghaiTime 
 			}
 		}
 		applyOverrides(genesis.Config)
-		block, _, err1 := write(tx, genesis, tmpDir)
+		block, _, err1 := write(tx, genesis, sparseTree, tmpDir)
 		if err1 != nil {
 			return genesis.Config, nil, err1
 		}
@@ -133,7 +138,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideShanghaiTime 
 
 	// Check whether the genesis block is already written.
 	if genesis != nil {
-		block, _, err1 := GenesisToBlock(genesis, tmpDir)
+		block, _, err1 := GenesisToBlock(genesis, sparseTree, tmpDir)
 		if err1 != nil {
 			return genesis.Config, nil, err1
 		}
@@ -194,8 +199,8 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideShanghaiTime 
 	return newCfg, storedBlock, nil
 }
 
-func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Block, *state.IntraBlockState, error) {
-	block, statedb, err := GenesisToBlock(g, tmpDir)
+func WriteGenesisState(g *types.Genesis, sparseTree *smt.SMT, tx kv.RwTx, tmpDir string) (*types.Block, *state.IntraBlockState, error) {
+	block, statedb, err := GenesisToBlock(g, sparseTree, tmpDir)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -236,13 +241,19 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 	}
 	return block, statedb, nil
 }
+
 func MustCommitGenesis(g *types.Genesis, db kv.RwDB, tmpDir string) *types.Block {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		panic(err)
 	}
 	defer tx.Rollback()
-	block, _, err := write(tx, g, tmpDir)
+
+	d := eridb.NewMemDb()
+	s := smt.NewSMT(d)
+	block, _, err := write(tx, g, s, tmpDir)
+	d = nil
+	s = nil
 	if err != nil {
 		panic(err)
 	}
@@ -255,8 +266,8 @@ func MustCommitGenesis(g *types.Genesis, db kv.RwDB, tmpDir string) *types.Block
 
 // Write writes the block and state of a genesis specification to the database.
 // The block is committed as the canonical head block.
-func write(tx kv.RwTx, g *types.Genesis, tmpDir string) (*types.Block, *state.IntraBlockState, error) {
-	block, statedb, err2 := WriteGenesisState(g, tx, tmpDir)
+func write(tx kv.RwTx, g *types.Genesis, sparseTree *smt.SMT, tmpDir string) (*types.Block, *state.IntraBlockState, error) {
+	block, statedb, err2 := WriteGenesisState(g, sparseTree, tx, tmpDir)
 	if err2 != nil {
 		return block, statedb, err2
 	}
@@ -477,7 +488,7 @@ var GenesisDBLock sync.Mutex
 
 // ToBlock creates the genesis block and writes state of a genesis specification
 // to the given database (or discards it if nil).
-func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.IntraBlockState, error) {
+func GenesisToBlock(g *types.Genesis, sparseTree *smt.SMT, tmpDir string) (*types.Block, *state.IntraBlockState, error) {
 	_ = g.Alloc //nil-check
 
 	head := &types.Header{
@@ -555,9 +566,6 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 			statedb.CreateAccount(libcommon.Address{}, false)
 		}
 
-		// use SMT
-		db := db.NewMemDb()
-		s := smt.NewSMT(db)
 		var ro *big.Int
 
 		keys := sortedAllocKeys(g.Alloc)
@@ -588,7 +596,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 				statedb.SetIncarnation(addr, state.FirstContractIncarnation)
 			}
 
-			ro, err = processAccount(s, ro, &account, addr)
+			ro, err = processAccount(sparseTree, ro, &account, addr)
 			if err != nil {
 				return
 			}
@@ -598,8 +606,6 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 		}
 
 		root = libcommon.BigToHash(ro)
-		s = nil
-		db = nil
 	}()
 	wg.Wait()
 	if err != nil {

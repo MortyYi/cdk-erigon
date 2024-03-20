@@ -24,6 +24,8 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	eridb "github.com/ledgerwatch/erigon/smt/pkg/db"
+	"github.com/ledgerwatch/erigon/smt/pkg/smt"
 )
 
 func ResetState(db kv.RwDB, ctx context.Context, chain string, tmpDir string) error {
@@ -171,7 +173,12 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string) (er
 		}
 		if !historyV3 {
 			genesis := core.GenesisBlockByChainName(chain)
-			if _, _, err := core.WriteGenesisState(genesis, tx, tmpDir); err != nil {
+			d := eridb.NewMemDb()
+			sparseTree := smt.NewSMT(d)
+			_, _, err = core.WriteGenesisState(genesis, sparseTree, tx, tmpDir)
+			sparseTree = nil
+			d = nil
+			if err != nil {
 				return err
 			}
 		}
