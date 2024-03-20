@@ -18,17 +18,24 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
+var (
+	NodeTypeSequencer    = byte(0)
+	NodeTypeSynchronizer = byte(1)
+)
+
 type DataStreamCatchupCfg struct {
-	db      kv.RwDB
-	stream  *datastreamer.StreamServer
-	chainId uint64
+	db       kv.RwDB
+	stream   *datastreamer.StreamServer
+	chainId  uint64
+	nodeType byte
 }
 
-func StageDataStreamCatchupCfg(stream *datastreamer.StreamServer, db kv.RwDB, chainId uint64) DataStreamCatchupCfg {
+func StageDataStreamCatchupCfg(stream *datastreamer.StreamServer, db kv.RwDB, chainId uint64, nodeType byte) DataStreamCatchupCfg {
 	return DataStreamCatchupCfg{
-		stream:  stream,
-		db:      db,
-		chainId: chainId,
+		stream:   stream,
+		db:       db,
+		chainId:  chainId,
+		nodeType: nodeType,
 	}
 }
 
@@ -64,11 +71,25 @@ func SpawnStageDataStreamCatchup(
 	srv := server.NewDataStreamServer(stream, cfg.chainId, server.StandardOperationMode)
 	reader := hermez_db.NewHermezDbReader(tx)
 
-	// read the highest batch number from the verified stage.  We cannot add data to the stream that
-	// has not been verified by the executor because we cannot unwind this later
-	executorVerifyProgress, err := stages.GetStageProgress(tx, stages.SequenceExecutorVerify)
-	if err != nil {
-		return err
+	var executorProgress uint64
+
+	switch cfg.nodeType {
+	case NodeTypeSequencer:
+		// read the highest batch number from the verified stage.  We cannot add data to the stream that
+		// has not been verified by the executor because we cannot unwind this later
+		executorVerifyProgress, err := stages.GetStageProgress(tx, stages.SequenceExecutorVerify)
+		if err != nil {
+			return err
+		}
+		executorProgress = executorVerifyProgress
+	case NodeTypeSynchronizer:
+		stageExecProgress, err := stages.GetStageProgress(tx, stages.Execution)
+		if err != nil {
+			return err
+		}
+		executorProgress = stageExecProgress
+	default:
+		return fmt.Errorf("unknown node type: %d", cfg.nodeType)
 	}
 
 	currentBatch, err := stages.GetStageProgress(tx, stages.DataStream)
@@ -102,12 +123,12 @@ func SpawnStageDataStreamCatchup(
 		return err
 	}
 
-	for ; currentBatch <= executorVerifyProgress; currentBatch++ {
+	for ; currentBatch <= executorProgress; currentBatch++ {
 		select {
 		case <-logTicker.C:
 			log.Info(fmt.Sprintf("[%s]: progress", logPrefix),
 				"batch", currentBatch,
-				"target", executorVerifyProgress, "%", math.Round(float64(currentBatch)/float64(executorVerifyProgress)*100))
+				"target", executorProgress, "%", math.Round(float64(currentBatch)/float64(executorProgress)*100))
 		default:
 		}
 
@@ -158,7 +179,7 @@ func SpawnStageDataStreamCatchup(
 
 	log.Info(fmt.Sprintf("[%s]: stage complete", logPrefix),
 		"batch", currentBatch-1,
-		"target", executorVerifyProgress, "%", math.Round(float64(currentBatch-1)/float64(executorVerifyProgress)*100))
+		"target", executorProgress, "%", math.Round(float64(currentBatch-1)/float64(executorProgress)*100))
 
 	return err
 }
