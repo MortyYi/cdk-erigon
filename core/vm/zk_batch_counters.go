@@ -17,10 +17,10 @@ type BatchCounterCollector struct {
 }
 
 func NewBatchCounterCollector(smtMaxLevel uint32, forkId uint16) *BatchCounterCollector {
-	totalLevel := len(strconv.FormatInt(int64(math.Pow(2, float64(smtMaxLevel))+250000), 2))
+	binaryLength := len(strconv.FormatInt(int64(math.Pow(2, float64(smtMaxLevel))+50_000), 2))
 	return &BatchCounterCollector{
 		transactions: []*TransactionCounter{},
-		smtLevels:    totalLevel,
+		smtLevels:    binaryLength,
 		blockCount:   0,
 		forkId:       forkId,
 	}

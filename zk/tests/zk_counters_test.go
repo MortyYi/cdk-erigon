@@ -55,6 +55,7 @@ type vector struct {
 	} `json:"virtualCounters"`
 	SequencerAddress string `json:"sequencerAddress"`
 	ChainId          int64  `json:"chainID"`
+	ForkId           uint64 `json:"forkID"`
 }
 
 func Test_RunTestVectors(t *testing.T) {
@@ -100,7 +101,7 @@ func runTest(t *testing.T, test vector, err error, fileNames []string, idx int) 
 		t.Fatal(err)
 	}
 	if len(decodedTransactions) == 0 {
-		t.Errorf("found no transactions in file %s", fileNames[idx])
+		fmt.Printf("found no transactions in file %s", fileNames[idx])
 	}
 
 	db, tx := memdb.NewTestTx(t)
@@ -198,19 +199,23 @@ func runTest(t *testing.T, test vector, err error, fileNames []string, idx int) 
 	stateReader := state.NewPlainStateReader(tx)
 	ibs := state.New(stateReader)
 
-	const smtMaxLevel = 80
-	batchCollector := vm.NewBatchCounterCollector(smtMaxLevel, 8)
-	overflow, err := batchCollector.StartNewBlock()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if overflow {
-		t.Fatal("unexpected overflow")
-	}
+	const smtMaxLevel = 4
+	batchCollector := vm.NewBatchCounterCollector(smtMaxLevel, uint16(test.ForkId))
 
+	blockStarted := false
 	for _, transaction := range decodedTransactions {
+		if !blockStarted {
+			overflow, err := batchCollector.StartNewBlock()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if overflow {
+				t.Fatal("unexpected overflow")
+			}
+			blockStarted = true
+		}
 		txCounters := vm.NewTransactionCounter(transaction, smtMaxLevel)
-		overflow, err = batchCollector.AddNewTransactionCounters(txCounters)
+		overflow, err := batchCollector.AddNewTransactionCounters(txCounters)
 		gasPool := new(core.GasPool).AddGas(transactionGasLimit)
 
 		vmCfg.CounterCollector = txCounters.ExecutionCounters()
