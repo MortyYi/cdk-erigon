@@ -18,6 +18,29 @@ const (
 	fpecHex = "0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F"
 )
 
+var (
+	fnec         *uint256.Int
+	fnecMinusOne *uint256.Int
+	fnecHalf     *uint256.Int
+	fpec         *uint256.Int
+)
+
+func init() {
+	var err error
+	fnec, err = uint256.FromHex(fnecHex)
+	if err != nil {
+		panic("could not parse fnec hex as uint256")
+	}
+
+	fnecMinusOne = fnec.Clone().Sub(fnec, uint256.NewInt(1))
+	fnecHalf = fnec.Clone().Div(fnec, uint256.NewInt(2))
+
+	fpec, err = uint256.FromHex(fpecHex)
+	if err != nil {
+		panic("could not parse fpec as uint256")
+	}
+}
+
 type Counter struct {
 	remaining     int
 	used          int
@@ -387,29 +410,19 @@ func (cc *CounterCollector) addBatchHashByteByByte() {
 }
 
 func (cc *CounterCollector) ecRecover(v, r, s *uint256.Int, isPrecompiled bool) error {
-	var upperLimit *uint256.Int
-	fnec, err := uint256.FromHex(fnecHex)
-	if err != nil {
-		return err
-	}
-	fnecMinusOne := fnec.Sub(fnec, uint256.NewInt(1))
-	if isPrecompiled {
-		upperLimit = fnecMinusOne
-	} else {
-		upperLimit = fnec.Div(fnec, uint256.NewInt(2))
+	upperLimit := fnecMinusOne
+	if !isPrecompiled {
+		upperLimit = fnecHalf
 	}
 
 	// handle a dodgy signature
-	if r.Uint64() == 0 || fnecMinusOne.Lt(r) || s.Uint64() == 0 || upperLimit.Lt(s) || (v.Uint64() != 27 && v.Uint64() != 28) {
+	fnecCheck := fnecMinusOne.Lt(r)
+	upperLimitCheck := upperLimit.Lt(s)
+	if r.Uint64() == 0 || s.Uint64() == 0 || fnecCheck || upperLimitCheck || (v.Uint64() != 27 && v.Uint64() != 28) {
 		cc.Deduct(S, 45)
 		cc.Deduct(A, 2)
 		cc.Deduct(B, 8)
 		return nil
-	}
-
-	fpec, err := uint256.FromHex(fpecHex)
-	if err != nil {
-		return err
 	}
 
 	// check if we have a sqrt to avoid counters at checkSqrtFpEc (from js)
@@ -420,6 +433,7 @@ func (cc *CounterCollector) ecRecover(v, r, s *uint256.Int, isPrecompiled bool) 
 		fpec,
 	)
 
+	var err error
 	r2 := fpec.Clone().Sqrt(c)
 	var parity uint64 = 1
 	if v.Uint64() == 27 {

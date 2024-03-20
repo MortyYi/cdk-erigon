@@ -24,6 +24,7 @@ import (
 	seq "github.com/ledgerwatch/erigon/zk/sequencer"
 	"errors"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"strings"
 )
 
 const root = "./testdata/counters"
@@ -268,35 +269,30 @@ func runTest(t *testing.T, test vector, err error, fileName string, idx int) {
 
 	var errors []string
 	if vc.Keccaks != combined[vm.K].Used() {
-		errors = append(errors, fmt.Sprintf("K have: %v want: %v", combined[vm.K].Used(), vc.Keccaks))
+		errors = append(errors, fmt.Sprintf("K=%v:%v", combined[vm.K].Used(), vc.Keccaks))
 	}
 	if vc.Arith != combined[vm.A].Used() {
-		errors = append(errors, fmt.Sprintf("A have: %v want: %v", combined[vm.A].Used(), vc.Arith))
+		errors = append(errors, fmt.Sprintf("A=%v:%v", combined[vm.A].Used(), vc.Arith))
 	}
 	if vc.Binary != combined[vm.B].Used() {
-		errors = append(errors, fmt.Sprintf("B have: %v want: %v", combined[vm.B].Used(), vc.Binary))
+		errors = append(errors, fmt.Sprintf("B=%v:%v", combined[vm.B].Used(), vc.Binary))
 	}
 	if vc.Padding != combined[vm.D].Used() {
-		errors = append(errors, fmt.Sprintf("D have: %v want: %v", combined[vm.D].Used(), vc.Padding))
+		errors = append(errors, fmt.Sprintf("D=%v:%v", combined[vm.D].Used(), vc.Padding))
 	}
 	if vc.Sha256 != combined[vm.SHA].Used() {
-		errors = append(errors, fmt.Sprintf("SHA have: %v want: %v", combined[vm.S].Used(), vc.Sha256))
+		errors = append(errors, fmt.Sprintf("SHA=%v:%v", combined[vm.S].Used(), vc.Sha256))
 	}
 	if vc.MemAlign != combined[vm.M].Used() {
-		errors = append(errors, fmt.Sprintf("M have: %v want: %v", combined[vm.M].Used(), vc.MemAlign))
+		errors = append(errors, fmt.Sprintf("M=%v:%v", combined[vm.M].Used(), vc.MemAlign))
 	}
 	if vc.Poseidon != combined[vm.P].Used() {
-		errors = append(errors, fmt.Sprintf("P have: %v want: %v", combined[vm.P].Used(), vc.Poseidon))
+		errors = append(errors, fmt.Sprintf("P=%v:%v", combined[vm.P].Used(), vc.Poseidon))
 	}
 	if vc.Steps != combined[vm.S].Used() {
-		errors = append(errors, fmt.Sprintf("S have: %v want: %v", combined[vm.S].Used(), vc.Steps))
+		errors = append(errors, fmt.Sprintf("S=%v:%v", combined[vm.S].Used(), vc.Steps))
 	}
-
 	if len(errors) > 0 {
-		t.Errorf("problems in file %s \n", fileName)
-		for _, e := range errors {
-			fmt.Println(e)
-		}
-		fmt.Println("")
+		t.Errorf("counter mismath in file %s: %s \n", fileName, strings.Join(errors, " "))
 	}
 }
