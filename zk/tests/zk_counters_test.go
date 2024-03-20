@@ -89,12 +89,12 @@ func Test_RunTestVectors(t *testing.T) {
 
 	for idx, test := range tests {
 		t.Run(fileNames[idx], func(t *testing.T) {
-			runTest(t, test, err, fileNames[idx])
+			runTest(t, test, err, fileNames[idx], idx)
 		})
 	}
 }
 
-func runTest(t *testing.T, test vector, err error, fileName string) {
+func runTest(t *testing.T, test vector, err error, fileName string, idx int) {
 	test.BatchL2DataDecoded, err = hex.DecodeHex(test.BatchL2Data)
 	if err != nil {
 		t.Fatal(err)
@@ -154,14 +154,14 @@ func runTest(t *testing.T, test vector, err error, fileName string) {
 		},
 	}
 
-	genesisBlock, _, sparseTree, err := core.WriteGenesisState(genesis, tx, "./temp")
+	genesisBlock, _, sparseTree, err := core.WriteGenesisState(genesis, tx, fmt.Sprintf("./temp-%v", idx))
 	if err != nil {
 		t.Fatal(err)
 	}
 	smtDepth := sparseTree.GetDepth()
 
 	genesisRoot := genesisBlock.Root()
-	expectedGenesisRoot := common.HexToHash(test.ExpectedNewRoot)
+	expectedGenesisRoot := common.HexToHash(test.ExpectedOldRoot)
 	if genesisRoot != expectedGenesisRoot {
 		t.Fatal("genesis root did not match expected")
 	}
