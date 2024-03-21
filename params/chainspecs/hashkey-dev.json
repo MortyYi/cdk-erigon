@@ -1,5 +1,5 @@
 {
-    "ChainName": "hashkey-dev",
+    "ChainName": "zkevm",
     "chainId": 1112,
     "consensus": "ethash",
     "homesteadBlock": 0,

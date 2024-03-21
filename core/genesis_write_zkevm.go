@@ -83,7 +83,7 @@ func X1TestnetGenesisBlock() *types.Genesis {
 func HskDevnetGenesisBlock() *types.Genesis {
 	return &types.Genesis{
 		Config:     params.HskDevnetChainConfig,
-		Timestamp:  1699369668,
+		Timestamp:  1710562560,
 		GasLimit:   0x0,
 		Difficulty: big.NewInt(0x0),
 		Alloc:      readPrealloc("allocs/hsk-devnet.json"),
