@@ -70,11 +70,15 @@
     "0x841BFf503a8325A171c51799caFD928160B5C057": {
         "accountName": "keyless Deployer",
         "balance": "0",
-        "nonce": "1"
+        "nonce": "1",
+        "code": null,
+        "storage": null
     },
     "0x94Fc338B74c9949Dc6657F91451d0C185d3c780b": {
         "accountName": "deployer",
         "balance": "100000000000000000000000",
-        "nonce": "8"
+        "nonce": "8",
+        "code": null,
+        "storage": null
     }
 }
