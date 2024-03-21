@@ -324,6 +324,8 @@ func ChainConfigByGenesisHash(genesisHash libcommon.Hash) *chain.Config {
 		return HermezCardonaChainConfig
 	case genesisHash == HermezCardonaInternalGenesisHash:
 		return HermezCardonaInternalChainConfig
+	case genesisHash == HskDevnetGenesisHash:
+		return HskDevnetChainConfig
 	default:
 		panic(fmt.Sprintf("Unknown genesis hash: %s", genesisHash.Hex()))
 		return nil
