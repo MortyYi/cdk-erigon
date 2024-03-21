@@ -596,7 +596,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 		if err = statedb.FinalizeTx(&chain.Rules{}, w); err != nil {
 			return
 		}
-
+		
 		root = libcommon.BigToHash(ro)
 		s = nil
 		db = nil
@@ -607,6 +607,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 	}
 
 	head.Root = root
+	fmt.Println("----state root----:", head.Root)
 
 	return types.NewBlock(head, nil, nil, nil, withdrawals), statedb, nil
 }
