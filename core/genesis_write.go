@@ -619,7 +619,7 @@ func sortedAllocKeys(m types.GenesisAlloc) []string {
 		keys[i] = string(k.Bytes())
 		i++
 	}
-	slices.Sort(keys)
+	// slices.Sort(keys)
 	return keys
 }
 
