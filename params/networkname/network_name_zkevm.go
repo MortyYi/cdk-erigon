@@ -7,6 +7,7 @@ const (
 	HermezCardonaChainName           = "hermez-cardona"
 	HermezCardonaInternalChainName   = "hermez-cardona-internal"
 	X1TestnetChainName               = "x1-testnet"
+	HskDevnetChainName				 = "hsk-devnet"
 	HermezEtrogChainName             = "hermez-etrog"
 )
 
